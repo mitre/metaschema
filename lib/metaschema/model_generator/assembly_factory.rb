@@ -82,9 +82,12 @@ module Metaschema
           field_xml&.mixed_content?
         end
 
+        ns_class = @g.runtime_namespace_class
+
         klass.class_eval do
           xml do
             element root_name
+            namespace ns_class if ns_class
             mixed_content if needs_mixed_content
             ordered
 
@@ -144,56 +147,100 @@ module Metaschema
       def collect_model_child_mappings(model)
         mappings = []
 
-        model.field&.each do |field_ref|
-          ref_name = field_ref.ref
-          next unless ref_name
-
-          xml_name = field_ref.use_name&.content || ref_name
-          group_as = field_ref.group_as
-          grouped = group_as&.in_xml == "GROUPED"
-          unwrapped = !grouped && field_ref.in_xml == "UNWRAPPED"
-
-          mappings << build_child_mapping(xml_name, group_as, grouped, ref_name,
-                                          unwrapped: unwrapped)
-        end
-
-        model.assembly&.each do |assembly_ref|
-          ref_name = assembly_ref.ref
-          next unless ref_name
-
-          xml_name = @g.assembly_xml_element_name(assembly_ref)
-          group_as = assembly_ref.group_as
-          grouped = group_as&.in_xml == "GROUPED"
-
-          attr_name = grouped ? Utils.safe_attr(group_as.name) : Utils.safe_attr(ref_name)
-          mappings << { xml_name: grouped ? group_as.name : xml_name,
-                        attr_name: attr_name, grouped: grouped }
-        end
-
-        model.define_field&.each do |inline_def|
-          next unless inline_def.name
-
-          unwrapped = inline_def.respond_to?(:in_xml) && inline_def.in_xml == "UNWRAPPED"
-          mappings << { xml_name: inline_def.name,
-                        attr_name: Utils.safe_attr(inline_def.name), grouped: false,
-                        unwrapped: unwrapped }
-        end
-
-        model.define_assembly&.each do |inline_def|
-          next unless inline_def.name
-
-          mappings << { xml_name: inline_def.name,
-                        attr_name: Utils.safe_attr(inline_def.name), grouped: false }
-        end
-
-        model.choice&.each do |c|
-          mappings.concat(collect_choice_child_mappings(c))
-        end
-        model.choice_group&.each do |cg|
-          mappings.concat(collect_choice_group_child_mappings(cg))
+        if model.respond_to?(:element_order) && model.element_order&.any?
+          collect_in_declaration_order(model, mappings)
+        else
+          collect_by_type(model, mappings)
         end
 
         mappings
+      end
+
+      def collect_in_declaration_order(model, mappings)
+        field_idx = 0
+        asm_idx = 0
+        def_field_idx = 0
+        def_asm_idx = 0
+        choice_idx = 0
+        choice_group_idx = 0
+
+        model.element_order.select { |e| e.node_type == :element }.each do |el|
+          case el.name
+          when "field"
+            item = model.field&.at(field_idx)
+            field_idx += 1
+            next unless item&.ref
+
+            collect_field_ref(item, mappings)
+          when "assembly"
+            item = model.assembly&.at(asm_idx)
+            asm_idx += 1
+            next unless item&.ref
+
+            collect_assembly_ref(item, mappings)
+          when "define-field"
+            item = model.define_field&.at(def_field_idx)
+            def_field_idx += 1
+            next unless item&.name
+
+            collect_inline_field(item, mappings)
+          when "define-assembly"
+            item = model.define_assembly&.at(def_asm_idx)
+            def_asm_idx += 1
+            next unless item&.name
+
+            collect_inline_assembly(item, mappings)
+          when "choice"
+            item = model.choice&.at(choice_idx)
+            choice_idx += 1
+            mappings.concat(collect_choice_child_mappings(item)) if item
+          when "choice-group"
+            item = model.choice_group&.at(choice_group_idx)
+            choice_group_idx += 1
+            mappings.concat(collect_choice_group_child_mappings(item)) if item
+          end
+        end
+      end
+
+      def collect_by_type(model, mappings)
+        model.field&.each { |item| collect_field_ref(item, mappings) if item.ref }
+        model.assembly&.each { |item| collect_assembly_ref(item, mappings) if item.ref }
+        model.define_field&.each { |item| collect_inline_field(item, mappings) if item.name }
+        model.define_assembly&.each { |item| collect_inline_assembly(item, mappings) if item.name }
+        model.choice&.each { |c| mappings.concat(collect_choice_child_mappings(c)) }
+        model.choice_group&.each { |cg| mappings.concat(collect_choice_group_child_mappings(cg)) }
+      end
+
+      def collect_field_ref(field_ref, mappings)
+        xml_name = field_ref.use_name&.content || field_ref.ref
+        group_as = field_ref.group_as
+        grouped = group_as&.in_xml == "GROUPED"
+        unwrapped = !grouped && field_ref.in_xml == "UNWRAPPED"
+
+        mappings << build_child_mapping(xml_name, group_as, grouped, field_ref.ref,
+                                        unwrapped: unwrapped)
+      end
+
+      def collect_assembly_ref(assembly_ref, mappings)
+        xml_name = @g.assembly_xml_element_name(assembly_ref)
+        group_as = assembly_ref.group_as
+        grouped = group_as&.in_xml == "GROUPED"
+
+        attr_name = grouped ? Utils.safe_attr(group_as.name) : Utils.safe_attr(assembly_ref.ref)
+        mappings << { xml_name: grouped ? group_as.name : xml_name,
+                      attr_name: attr_name, grouped: grouped }
+      end
+
+      def collect_inline_field(inline_def, mappings)
+        unwrapped = inline_def.respond_to?(:in_xml) && inline_def.in_xml == "UNWRAPPED"
+        mappings << { xml_name: inline_def.name,
+                      attr_name: Utils.safe_attr(inline_def.name), grouped: false,
+                      unwrapped: unwrapped }
+      end
+
+      def collect_inline_assembly(inline_def, mappings)
+        mappings << { xml_name: inline_def.name,
+                      attr_name: Utils.safe_attr(inline_def.name), grouped: false }
       end
 
       def collect_choice_child_mappings(choice)

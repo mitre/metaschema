@@ -33,15 +33,30 @@ module Metaschema
 
       def to_ruby_source(metaschema_path, module_name:, base_path: nil,
 split: false)
-        classes = generate_from_file(metaschema_path, base_path: base_path)
-        emitter = RubySourceEmitter.new(classes, module_name, self)
+        base_path ||= File.dirname(File.expand_path(metaschema_path))
+        metaschema = Metaschema::Root.from_xml(File.read(metaschema_path))
+        generator = new
+        classes = generator.generate(metaschema, base_path: base_path)
+        emitter = RubySourceEmitter.new(classes, module_name, generator)
         split ? emitter.emit_split : emitter.emit
       end
     end
 
     # Shared state — accessed by FieldFactory and AssemblyFactory via @g
-    attr_reader :classes, :field_defs, :assembly_defs, :flag_defs
+    attr_reader :classes, :field_defs, :assembly_defs, :flag_defs, :namespace
     attr_accessor :current_assembly_name
+
+    def runtime_namespace_class
+      return @runtime_namespace_class if defined?(@runtime_namespace_class)
+
+      @runtime_namespace_class = if @namespace && !@namespace.empty?
+                                   ns_uri = @namespace
+                                   Class.new(Lutaml::Xml::Namespace) do
+                                     uri ns_uri
+                                     prefix_default ""
+                                   end
+                                 end
+    end
 
     def generate(metaschema, base_path: nil)
       @classes = {}

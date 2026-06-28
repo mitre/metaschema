@@ -238,11 +238,12 @@ RSpec.describe Metaschema::ModelGenerator, "dynamic model creation" do
       xml_map = part_klass.mappings_for(:xml)
       elements = xml_map.instance_variable_get(:@elements)
 
-      element_names = elements.keys
+      element_names = elements.keys.map { |k| k.split(":").last }
       expect(element_names).to include("p")
       expect(element_names).not_to include("prose")
 
-      p_rule = elements["p"]
+      p_key = elements.keys.find { |k| k.end_with?(":p") || k == "p" }
+      p_rule = elements[p_key]
       expect(p_rule.delegate).to eq(:prose)
     end
 
@@ -258,6 +259,33 @@ RSpec.describe Metaschema::ModelGenerator, "dynamic model creation" do
       content = xml_map.content_mapping
       expect(content).not_to be_nil
       expect(content.delegate).to eq(:prose)
+    end
+  end
+
+  describe "element declaration order preservation" do
+    it "preserves metaschema element declaration order in generated XML mappings" do
+      part_klass = find_class(complete_classes, "part")
+      xml_map = part_klass.mappings_for(:xml)
+      elements = xml_map.instance_variable_get(:@elements)
+
+      local_names = elements.keys.map { |k| k.include?(":") ? k.split(":").last : k }
+
+      title_idx = local_names.index("title")
+      prop_idx = local_names.index("prop")
+      part_idx = local_names.index("part")
+      link_idx = local_names.index("link")
+
+      expect(title_idx).to be < prop_idx
+      expect(prop_idx).to be < part_idx
+      expect(part_idx).to be < link_idx
+    end
+  end
+
+  describe "XML namespace from metaschema" do
+    it "applies namespace from metaschema to runtime XML mappings" do
+      catalog_klass = find_class(complete_classes, "catalog")
+      xml_map = catalog_klass.mappings_for(:xml)
+      expect(xml_map.namespace_uri).to eq("http://csrc.nist.gov/ns/oscal/1.0")
     end
   end
 end

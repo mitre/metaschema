@@ -169,5 +169,16 @@ RSpec.describe Metaschema::ModelGenerator, ".to_ruby_source" do
       catalog_source = source[catalog_start..catalog_end]
       expect(catalog_source).to include("attribute :metadata, :metadata")
     end
+
+    it "emits a namespace class from the metaschema namespace element" do
+      source = files.values.first
+      expect(source).to include("class ModuleNamespace < Lutaml::Xml::Namespace")
+      expect(source).to include('uri "http://csrc.nist.gov/ns/oscal/1.0"')
+    end
+
+    it "references the namespace class in generated xml blocks" do
+      source = files.values.first
+      expect(source).to include("namespace ModuleNamespace")
+    end
   end
 end

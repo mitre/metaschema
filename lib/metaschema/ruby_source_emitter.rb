@@ -259,6 +259,19 @@ module Metaschema
 
     def emit_module_header
       register_id = derive_register_id
+      ns_uri = @generator.namespace
+      ns_block = if ns_uri && !ns_uri.empty?
+                   <<~NS.gsub(/^/, "  ")
+
+                     class ModuleNamespace < Lutaml::Xml::Namespace
+                       uri "#{ns_uri}"
+                       prefix_default ""
+                     end
+                   NS
+                 else
+                   ""
+                 end
+
       <<~RUBY
         # frozen_string_literal: true
 
@@ -270,6 +283,7 @@ module Metaschema
               :#{register_id}
             end
           end
+        #{ns_block}
       RUBY
     end
 
@@ -360,6 +374,9 @@ module Metaschema
       element_name = xml_map.instance_variable_get(:@element_name)
       lines << "      element \"#{element_name}\"" if element_name
 
+      ns_uri = @generator.namespace
+      lines << "      namespace ModuleNamespace" if ns_uri && !ns_uri.empty?
+
       if xml_map.instance_variable_get(:@mixed_content)
         lines << "      mixed_content"
       end
@@ -379,15 +396,17 @@ module Metaschema
       xml_map.instance_variable_get(:@attributes)&.each do |xml_name, rule|
         next if rule.delegate
 
-        opts = ["\"#{xml_name}\"", "to: :#{rule.to}"]
+        local_name = xml_name.include?(":") ? xml_name.split(":").last : xml_name
+        opts = ["\"#{local_name}\"", "to: :#{rule.to}"]
         lines << "      map_attribute #{opts.join(', ')}"
       end
 
-      # Element mappings (skip delegated)
+      # Element mappings (skip delegated, strip namespace prefix)
       xml_map.instance_variable_get(:@elements)&.each do |xml_name, rule|
         next if rule.delegate
 
-        opts = ["\"#{xml_name}\"", "to: :#{rule.to}"]
+        local_name = xml_name.include?(":") ? xml_name.split(":").last : xml_name
+        opts = ["\"#{local_name}\"", "to: :#{rule.to}"]
         lines << "      map_element #{opts.join(', ')}"
       end
 
@@ -413,7 +432,8 @@ module Metaschema
       xml_map.instance_variable_get(:@elements)&.each do |xml_name, rule|
         next unless rule.delegate
 
-        delegations << { type: :element, name: xml_name, to: rule.to, delegate: rule.delegate }
+        local_name = xml_name.include?(":") ? xml_name.split(":").last : xml_name
+        delegations << { type: :element, name: local_name, to: rule.to, delegate: rule.delegate }
       end
 
       return nil if delegations.empty?
