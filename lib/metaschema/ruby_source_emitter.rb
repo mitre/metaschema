@@ -317,6 +317,10 @@ module Metaschema
       xml_source = emit_xml_mapping(klass)
       lines.concat(xml_source) if xml_source
 
+      # Delegated XML mappings (applied at runtime after register init)
+      delegated = emit_delegated_xml_mappings(klass)
+      lines.concat(delegated) if delegated
+
       # Key-value mapping
       kv_source = emit_key_value_mapping(klass)
       lines.concat(kv_source) if kv_source
@@ -364,28 +368,67 @@ module Metaschema
         lines << "      ordered"
       end
 
-      # Content mapping
+      # Content mapping (skip delegated — applied at runtime after register init)
       content = xml_map.instance_variable_get(:@content_mapping)
-      if content
+      if content && !content.delegate
         opts = ["to: :#{content.to}"]
-        opts << "delegate: :#{content.delegate}" if content.delegate
         lines << "      map_content #{opts.join(', ')}"
       end
 
-      # Attribute mappings
+      # Attribute mappings (skip delegated)
       xml_map.instance_variable_get(:@attributes)&.each do |xml_name, rule|
+        next if rule.delegate
+
         opts = ["\"#{xml_name}\"", "to: :#{rule.to}"]
-        opts << "delegate: :#{rule.delegate}" if rule.delegate
         lines << "      map_attribute #{opts.join(', ')}"
       end
 
-      # Element mappings
+      # Element mappings (skip delegated)
       xml_map.instance_variable_get(:@elements)&.each do |xml_name, rule|
+        next if rule.delegate
+
         opts = ["\"#{xml_name}\"", "to: :#{rule.to}"]
-        opts << "delegate: :#{rule.delegate}" if rule.delegate
         lines << "      map_element #{opts.join(', ')}"
       end
 
+      lines << "    end"
+      lines
+    end
+
+    def emit_delegated_xml_mappings(klass)
+      xml_map = begin
+        klass.mappings_for(:xml)
+      rescue StandardError
+        nil
+      end
+      return nil unless xml_map
+
+      delegations = []
+
+      content = xml_map.instance_variable_get(:@content_mapping)
+      if content&.delegate
+        delegations << { type: :content, to: content.to, delegate: content.delegate }
+      end
+
+      xml_map.instance_variable_get(:@elements)&.each do |xml_name, rule|
+        next unless rule.delegate
+
+        delegations << { type: :element, name: xml_name, to: rule.to, delegate: rule.delegate }
+      end
+
+      return nil if delegations.empty?
+
+      lines = []
+      lines << ""
+      lines << "    def self.apply_xml_delegations"
+      lines << "      xml_mapping = mappings[:xml]"
+      delegations.each do |d|
+        if d[:type] == :content
+          lines << "      xml_mapping.map_content to: :#{d[:to]}, delegate: :#{d[:delegate]}"
+        else
+          lines << "      xml_mapping.map_element \"#{d[:name]}\", to: :#{d[:to]}, delegate: :#{d[:delegate]}"
+        end
+      end
       lines << "    end"
       lines
     end
