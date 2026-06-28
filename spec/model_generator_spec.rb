@@ -231,4 +231,33 @@ RSpec.describe Metaschema::ModelGenerator, "dynamic model creation" do
       expect { RubyVM::AbstractSyntaxTree.parse(source) }.not_to raise_error
     end
   end
+
+  describe "UNWRAPPED inline define-field delegation" do
+    it "delegates UNWRAPPED inline define-field elements to parent assembly" do
+      part_klass = find_class(complete_classes, "part")
+      xml_map = part_klass.mappings_for(:xml)
+      elements = xml_map.instance_variable_get(:@elements)
+
+      element_names = elements.keys
+      expect(element_names).to include("p")
+      expect(element_names).not_to include("prose")
+
+      p_rule = elements["p"]
+      expect(p_rule.delegate).to eq(:prose)
+    end
+
+    it "sets mixed_content on parent when UNWRAPPED child has mixed_content" do
+      part_klass = find_class(complete_classes, "part")
+      xml_map = part_klass.mappings_for(:xml)
+      expect(xml_map.mixed_content?).to be true
+    end
+
+    it "delegates content mapping from UNWRAPPED child to parent" do
+      part_klass = find_class(complete_classes, "part")
+      xml_map = part_klass.mappings_for(:xml)
+      content = xml_map.content_mapping
+      expect(content).not_to be_nil
+      expect(content.delegate).to eq(:prose)
+    end
+  end
 end

@@ -27,9 +27,9 @@ module Metaschema
           data = normalize(@data)
           data = separate(data) if @collapsible
           data = cast(data)
-          validate_collection!(data)
           data = transform(data)
           data = unwrap_singleton(data)
+          validate_collection!(data)
 
           @model.public_send(:"#{@attribute.name}=", data)
         end

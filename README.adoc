@@ -145,6 +145,26 @@ The `TypeMapper` maps Metaschema data types to Ruby/Lutaml::Model types:
 * `moxml >= 0.1.15` — XML adapter (uses `namespace_validation_mode=` API)
 
 
+== Development
+
+After checking out the repo, run `bundle install` to install dependencies.
+
+[source,bash]
+----
+# Run full test suite (parallel — preferred)
+bundle exec parallel_rspec spec/ -n 4
+
+# Run full test suite (sequential)
+bundle exec rspec
+
+# Run a single spec file or line
+bundle exec rspec spec/model_generator_spec.rb
+bundle exec rspec spec/model_generator_spec.rb:236
+
+# Run linting
+bundle exec rubocop --autocorrect-all
+----
+
 == Tests
 
 The `spec/fixtures` folder contains tests that the Metaschema gem needs to

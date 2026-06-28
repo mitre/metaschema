@@ -71,9 +71,21 @@ module Metaschema
           m[:unwrapped]
         end
 
+        needs_mixed_content = unwrapped_mappings.any? do |m|
+          attr_obj = klass.attributes[m[:attr_name]]
+          next false unless attr_obj
+
+          field_type = attr_obj.type
+          next false unless field_type.respond_to?(:mappings)
+
+          field_xml = field_type.mappings[:xml]
+          field_xml&.mixed_content?
+        end
+
         klass.class_eval do
           xml do
             element root_name
+            mixed_content if needs_mixed_content
             ordered
 
             flag_attr_maps.each do |xml_name, attr_name|
@@ -161,8 +173,10 @@ module Metaschema
         model.define_field&.each do |inline_def|
           next unless inline_def.name
 
+          unwrapped = inline_def.respond_to?(:in_xml) && inline_def.in_xml == "UNWRAPPED"
           mappings << { xml_name: inline_def.name,
-                        attr_name: Utils.safe_attr(inline_def.name), grouped: false }
+                        attr_name: Utils.safe_attr(inline_def.name), grouped: false,
+                        unwrapped: unwrapped }
         end
 
         model.define_assembly&.each do |inline_def|

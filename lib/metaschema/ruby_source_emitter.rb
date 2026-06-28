@@ -262,6 +262,8 @@ module Metaschema
       <<~RUBY
         # frozen_string_literal: true
 
+        require "metaschema"
+
         module #{@module_name}
           class Base < Lutaml::Model::Serializable
             def self.lutaml_default_register
@@ -490,7 +492,7 @@ module Metaschema
 
       lines << "      if value.is_a?(Array)"
       if has_flags && tc
-        lines << "        parsed = value.map { |v| #{tc}.of_json(v) }"
+        lines << "        parsed = value.map { |v| v.is_a?(String) ? #{tc}.new(content: v) : #{tc}.of_json(v) }"
         lines << "        instance.instance_variable_set(:@#{attr_name}, parsed)"
         lines << "      elsif value.is_a?(Hash)"
         lines << "        if value.empty?"
@@ -500,7 +502,7 @@ module Metaschema
         lines << "          instance.instance_variable_set(:@#{attr_name}, #{tc}.of_json(value))"
         lines << "        end"
         lines << "      elsif value"
-        lines << "        instance.instance_variable_set(:@#{attr_name}, #{tc}.of_json(value))"
+        lines << "        instance.instance_variable_set(:@#{attr_name}, #{tc}.new(content: value))"
       else
         lines << "        instance.instance_variable_set(:@#{attr_name}, value.map { |v| #{tc || 'String'}.new(content: v) })"
         lines << "      elsif value"
@@ -616,6 +618,10 @@ module Metaschema
 
       lines << "        end"
       lines << "        doc[\"#{json_name}\"] = result.length == 1 ? result.first : result"
+      if tc
+        lines << "      elsif current.is_a?(Lutaml::Model::Serializable)"
+        lines << "        doc[\"#{json_name}\"] = #{tc}.as_json(current)"
+      end
       lines << "      end"
       lines << "    end"
       lines
@@ -645,7 +651,8 @@ module Metaschema
         lines << "      parsed = items"
       end
 
-      lines << "      instance.instance_variable_set(:@#{attr_name}, parsed)"
+      lines << "      result = value.is_a?(Hash) ? parsed.first : parsed"
+      lines << "      instance.instance_variable_set(:@#{attr_name}, result)"
       lines << "    end"
       lines
     end
@@ -679,6 +686,10 @@ module Metaschema
 
       lines << "        end"
       lines << "        doc[\"#{json_name}\"] = result.length == 1 ? result.first : result"
+      if tc
+        lines << "      elsif current.is_a?(Lutaml::Model::Serializable)"
+        lines << "        doc[\"#{json_name}\"] = #{tc}.as_json(current)"
+      end
       lines << "      end"
       lines << "    end"
       lines
@@ -758,8 +769,7 @@ module Metaschema
       lines << "    end"
       lines << ""
       lines << "    def self.to_yaml(instance, options = {})"
-      lines << "      yaml_str = super(instance, options)"
-      lines << "      data = YAML.safe_load(yaml_str, permitted_classes: [Date, Time, Symbol])"
+      lines << "      data = as_yaml(instance, options)"
       lines << "      { \"#{root_name}\" => data }.to_yaml"
       lines << "    end"
       lines << ""
