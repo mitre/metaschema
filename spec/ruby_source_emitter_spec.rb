@@ -161,6 +161,16 @@ RSpec.describe Metaschema::ModelGenerator, ".to_ruby_source" do
       expect(has_singular).to be(true), "Expected json_assembly_soa_to methods to handle singular Serializable"
     end
 
+    it "generates custom with: serializer for UNWRAPPED prose in key_value mapping" do
+      source = files.values.first
+      part_start = source.index("class Part < Base")
+      next_class = source.index("\n  class ", part_start + 1)
+      part_section = source[part_start...next_class]
+
+      expect(part_section).to include('map "prose"')
+      expect(part_section).to include("with:")
+    end
+
     it "uses symbol type references for class attributes" do
       source = files.values.first
       # Catalog's metadata attribute should use symbol reference

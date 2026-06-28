@@ -332,12 +332,18 @@ module Metaschema
       lines.concat(xml_source) if xml_source
 
       # Delegated XML mappings (applied at runtime after register init)
-      delegated = emit_delegated_xml_mappings(klass)
+      delegated_info = collect_delegated_attrs(klass)
+      delegated = emit_delegated_xml_mappings_from(delegated_info)
       lines.concat(delegated) if delegated
 
       # Key-value mapping
-      kv_source = emit_key_value_mapping(klass)
+      unwrapped_attr_names = delegated_info.map { |d| d[:delegate] }.uniq
+      kv_source = emit_key_value_mapping(klass, unwrapped_attrs: unwrapped_attr_names)
       lines.concat(kv_source) if kv_source
+
+      # Custom methods for UNWRAPPED markup serialization
+      unwrapped_kv_methods = emit_unwrapped_kv_methods(klass, unwrapped_attr_names)
+      lines.concat(unwrapped_kv_methods) if unwrapped_kv_methods
 
       # Custom methods for with: callbacks
       custom_methods = emit_custom_methods(klass)
@@ -414,13 +420,13 @@ module Metaschema
       lines
     end
 
-    def emit_delegated_xml_mappings(klass)
+    def collect_delegated_attrs(klass)
       xml_map = begin
         klass.mappings_for(:xml)
       rescue StandardError
         nil
       end
-      return nil unless xml_map
+      return [] unless xml_map
 
       delegations = []
 
@@ -436,6 +442,10 @@ module Metaschema
         delegations << { type: :element, name: local_name, to: rule.to, delegate: rule.delegate }
       end
 
+      delegations
+    end
+
+    def emit_delegated_xml_mappings_from(delegations)
       return nil if delegations.empty?
 
       lines = []
@@ -453,7 +463,7 @@ module Metaschema
       lines
     end
 
-    def emit_key_value_mapping(klass)
+    def emit_key_value_mapping(klass, unwrapped_attrs: [])
       kv_map = begin
         klass.mappings_for(:json)
       rescue StandardError
@@ -484,6 +494,13 @@ module Metaschema
           opts_parts << " }"
           opts << opts_parts.join
           lines << "      map \"#{json_name}\", #{opts.join(', ')}"
+        elsif unwrapped_attrs.include?(rule.to)
+          from_method = "kv_from_#{rule.to}"
+          to_method = "kv_to_#{rule.to}"
+          render_empty = rule.instance_variable_get(:@render_empty)
+          opts = ["to: :#{rule.to}", "with: { from: :#{from_method}, to: :#{to_method} }"]
+          opts << "render_empty: true" if render_empty
+          lines << "      map \"#{json_name}\", #{opts.join(', ')}"
         else
           render_empty = rule.instance_variable_get(:@render_empty)
           lines << if render_empty
@@ -495,6 +512,47 @@ module Metaschema
       end
 
       lines << "    end"
+      lines
+    end
+
+    def emit_unwrapped_kv_methods(_klass, unwrapped_attr_names)
+      return nil if unwrapped_attr_names.empty?
+
+      lines = []
+      unwrapped_attr_names.each do |attr_name|
+        lines << ""
+        lines << "    def kv_from_#{attr_name}(model, value)"
+        lines << "      return unless value"
+        lines << "      str = value.is_a?(String) ? value : value.to_s"
+        lines << "      model.#{attr_name} = #{attr_name.to_s.split('_').map(&:capitalize).join}.new(content: str.split(\"\\n\\n\"))"
+        lines << "    end"
+        lines << ""
+        lines << "    def kv_to_#{attr_name}(model, doc)"
+        lines << "      val = model.#{attr_name}"
+        lines << "      return unless val"
+        lines << "      parts = []"
+        lines << "      if val.respond_to?(:element_order) && val.element_order&.any?"
+        lines << "        val.element_order.select { |e| e.node_type == :element || e.node_type == :text }.each do |e|"
+        lines << "          if e.node_type == :text && e.text_content&.strip&.length&.positive?"
+        lines << "            parts << e.text_content.strip"
+        lines << "          elsif e.node_type == :element"
+        lines << "            child = val.public_send(e.name) rescue nil"
+        lines << "            next unless child"
+        lines << "            items = child.is_a?(Array) ? child : [child]"
+        lines << "            items.each do |item|"
+        lines << "              content = item.respond_to?(:content) ? item.content : item.to_s"
+        lines << "              parts << (content.is_a?(Array) ? content.join : content)"
+        lines << "            end"
+        lines << "          end"
+        lines << "        end"
+        lines << "      else"
+        lines << "        content = val.respond_to?(:content) ? val.content : val.to_s"
+        lines << "        parts << (content.is_a?(Array) ? content.join : content)"
+        lines << "      end"
+        lines << "      text = parts.join(\"\\n\\n\")"
+        lines << "      doc[\"#{attr_name}\"] = text unless text.empty?"
+        lines << "    end"
+      end
       lines
     end
 
